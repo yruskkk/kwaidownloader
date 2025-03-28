@@ -26,38 +26,106 @@ app.post('/api/kwai', async (req, res) => {
             });
         }
 
+        console.log('Processando URL:', url);
+
+        // Configuração de headers mais completa para simular um navegador
+        const headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://www.kwai.com/',
+            'DNT': '1',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Cache-Control': 'max-age=0'
+        };
+
         // Obter o HTML da página do Kwai
-        const response = await axios.get(url, {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-            }
-        });
-
+        const response = await axios.get(url, { headers });
         const html = response.data;
-
-        // Extrair a URL do vídeo
-        // Nota: Esta expressão regular pode precisar ser atualizada conforme o Kwai muda sua estrutura
-        const videoUrlMatch = html.match(/"video":{"url":"([^"]+)"/);
         
-        if (!videoUrlMatch || !videoUrlMatch[1]) {
+        console.log('HTML recebido, tamanho:', html.length);
+
+        // Diferentes padrões de extração para tentar encontrar o vídeo
+        let videoUrl = null;
+        
+        // Método 1: Padrão antigo
+        const videoUrlMatch1 = html.match(/"video":{"url":"([^"]+)"/);
+        if (videoUrlMatch1 && videoUrlMatch1[1]) {
+            videoUrl = videoUrlMatch1[1].replace(/\\u002F/g, '/');
+            console.log('Método 1 encontrou a URL do vídeo');
+        }
+        
+        // Método 2: Novo padrão com "playAddr"
+        if (!videoUrl) {
+            const videoUrlMatch2 = html.match(/"playAddr":"([^"]+)"/);
+            if (videoUrlMatch2 && videoUrlMatch2[1]) {
+                videoUrl = videoUrlMatch2[1].replace(/\\u002F/g, '/');
+                console.log('Método 2 encontrou a URL do vídeo');
+            }
+        }
+        
+        // Método 3: Procurar por URLs MP4 diretas
+        if (!videoUrl) {
+            const mp4UrlMatch = html.match(/(https:\/\/[^"']+\.mp4)/);
+            if (mp4UrlMatch && mp4UrlMatch[1]) {
+                videoUrl = mp4UrlMatch[1];
+                console.log('Método 3 encontrou a URL do vídeo');
+            }
+        }
+        
+        // Método 4: Procurar dados na resposta JSON incorporada
+        if (!videoUrl) {
+            const jsonDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">([^<]+)<\/script>/);
+            if (jsonDataMatch && jsonDataMatch[1]) {
+                try {
+                    const jsonData = JSON.parse(jsonDataMatch[1]);
+                    console.log('Dados JSON extraídos, procurando URL do vídeo');
+                    
+                    // Navegar através da estrutura de objetos para encontrar a URL do vídeo
+                    if (jsonData.props && jsonData.props.pageProps && jsonData.props.pageProps.videoInfo) {
+                        const videoInfo = jsonData.props.pageProps.videoInfo;
+                        if (videoInfo.videoUrl) {
+                            videoUrl = videoInfo.videoUrl;
+                            console.log('URL do vídeo encontrada em videoInfo.videoUrl');
+                        } else if (videoInfo.video && videoInfo.video.url) {
+                            videoUrl = videoInfo.video.url;
+                            console.log('URL do vídeo encontrada em videoInfo.video.url');
+                        } else if (videoInfo.mainUrl) {
+                            videoUrl = videoInfo.mainUrl;
+                            console.log('URL do vídeo encontrada em videoInfo.mainUrl');
+                        }
+                    }
+                } catch (e) {
+                    console.error('Erro ao analisar JSON:', e.message);
+                }
+            }
+        }
+
+        if (!videoUrl) {
+            console.log('Nenhum método encontrou a URL do vídeo');
             return res.status(404).json({ 
                 success: false, 
                 message: 'Não foi possível encontrar o vídeo na página fornecida' 
             });
         }
         
-        // Limpar a URL do vídeo (remover escapes)
-        const videoUrl = videoUrlMatch[1].replace(/\\u002F/g, '/');
-        
         // Extrair informações do autor (opcional)
+        let author = 'Autor desconhecido';
         const authorMatch = html.match(/"author":\s*{\s*"name":\s*"([^"]+)"/);
-        const author = authorMatch ? authorMatch[1] : 'Autor desconhecido';
+        if (authorMatch && authorMatch[1]) {
+            author = authorMatch[1];
+        }
         
         // Extrair título do vídeo (opcional)
+        let title = 'Vídeo do Kwai';
         const titleMatch = html.match(/"caption":\s*"([^"]+)"/);
-        const title = titleMatch ? titleMatch[1] : 'Vídeo do Kwai';
+        if (titleMatch && titleMatch[1]) {
+            title = titleMatch[1];
+        }
         
         // Retornar os dados do vídeo
+        console.log('Sucesso! URL do vídeo encontrada:', videoUrl.substring(0, 50) + '...');
         return res.json({
             success: true,
             videoUrl,
@@ -65,7 +133,11 @@ app.post('/api/kwai', async (req, res) => {
             title
         });
     } catch (error) {
-        console.error('Erro ao processar vídeo do Kwai:', error);
+        console.error('Erro ao processar vídeo do Kwai:', error.message);
+        if (error.response) {
+            console.error('Status de resposta:', error.response.status);
+            console.error('Headers:', JSON.stringify(error.response.headers));
+        }
         
         return res.status(500).json({ 
             success: false, 
@@ -110,4 +182,4 @@ app.listen(PORT, () => {
 });
 
 // Exportar a aplicação para uso com serverless (Vercel)
-module.exports = app; 
+module.exports = app;

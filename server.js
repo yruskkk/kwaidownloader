@@ -146,6 +146,48 @@ app.post('/api/kwai', async (req, res) => {
     }
 });
 
+// NOVO ENDPOINT: Rota para forçar download do vídeo
+app.get('/api/download', async (req, res) => {
+    try {
+        const { url } = req.query;
+        
+        if (!url) {
+            return res.status(400).send('URL não fornecida');
+        }
+        
+        console.log('Processando download da URL:', url);
+        
+        // Obter o conteúdo do vídeo
+        const response = await axios({
+            url,
+            method: 'GET',
+            responseType: 'stream',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+            }
+        });
+        
+        // Obter o nome do arquivo da URL ou usar um nome padrão
+        const fileName = url.split('/').pop().split('?')[0] || 'video-kwai.mp4';
+        
+        // Configurar headers para download
+        res.setHeader('Content-Disposition', `attachment; filename=${fileName}`);
+        res.setHeader('Content-Type', 'video/mp4');
+        
+        // Enviar o stream do vídeo para download
+        response.data.pipe(res);
+        
+        console.log('Download iniciado para:', fileName);
+        
+    } catch (error) {
+        console.error('Erro ao baixar vídeo:', error.message);
+        if (error.response) {
+            console.error('Status da resposta:', error.response.status);
+        }
+        res.status(500).send('Erro ao processar o download');
+    }
+});
+
 // Rota para verificar status da API
 app.get('/api/status', (req, res) => {
     res.json({ status: 'online' });
@@ -170,6 +212,8 @@ app.get('/', (req, res) => {
                 <p>Faça uma requisição POST para <code>/api/kwai</code> com o corpo JSON:</p>
                 <pre>{ "url": "https://kwai.com/seu-link-do-video" }</pre>
                 <p>A resposta será um JSON com a URL do vídeo e informações adicionais.</p>
+                <h2>Download direto:</h2>
+                <p>Para baixar um vídeo diretamente, use: <code>/api/download?url=URL_DO_VIDEO</code></p>
             </body>
         </html>
     `);
